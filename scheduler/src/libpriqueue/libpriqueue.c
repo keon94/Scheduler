@@ -8,8 +8,9 @@
 #include "libpriqueue.h"
 
 
-//Insetion to tail, removal from head
 
+//This queue is implemented as a single linked list
+//Diagram:   Head -> . -> . -> .... -> . -> Tail => NULL
 node_t* node_init(void* data, node_t* next){
   node_t *node = malloc(sizeof(node_t));
   node->data = data;
@@ -17,7 +18,8 @@ node_t* node_init(void* data, node_t* next){
   return node;
 }
 
-//Removes the node next to the supplied node from queue q.
+//Removes the node next to the supplied node from queue q. This is the 
+//only way to remove an intermediate node in a single linked list.
 //Returns the data of the deleted node
 void* remove_next_node(priqueue_t *q, node_t* node){
     assert(q != NULL);
@@ -37,6 +39,10 @@ void* remove_next_node(priqueue_t *q, node_t* node){
     }
 }
 
+/**
+  Removes the head of the queue, making the next node in the queue the new head.
+  Returns the data pointer from the old head
+*/
 void* remove_queue_head(priqueue_t* q){
     node_t *head = q->head;
     q->head = head->next;
@@ -76,17 +82,36 @@ void priqueue_init(priqueue_t *q, int(*comparer)(const void *, const void *))
 int priqueue_offer(priqueue_t *q, void *ptr)
 {
     assert(q != NULL);
+    int index = 0;
     if(q->size == 0){
         q->head =  q->tail = node_init(ptr, NULL);
-        q->size = 1;
     }
     else{
-        node_t *new_tail = node_init(ptr, NULL);
-        q->tail->next = new_tail;
-        q->tail = new_tail;
-        q->size++;
+      node_t *new_node;
+      if(q->comparer(ptr, q->head->data) <= 0){ //inserting to the head of the queue
+          new_node = node_init(ptr, q->head);
+          q->head = new_node;
+      }
+      else{
+        node_t *node;
+        for(node = q->head; node->next != NULL; node = node->next){ //inserting elsewhere in the queue
+          index++;
+          if(q->comparer(ptr, node->next->data) <= 0){
+              new_node = node_init(ptr, node->next);
+              node->next = new_node;
+              break;
+          }
+        }
+        if(!node->next){  //inserting to the tail of the queue
+            index++;
+            new_node = node_init(ptr, NULL);
+            node->next = new_node;
+            q->tail = new_node;
+        }        
+      }
     }
-	return (q->size - 1);
+    q->size++;
+	  return index;
 }
 
 
@@ -122,10 +147,14 @@ void *priqueue_poll(priqueue_t *q)
   if(q->size == 0)
 	  return NULL;
   else
-    return priqueue_remove_at(q,q->size-1);
+    return priqueue_remove_at(q,0); //tail index is 0
 
 }
 
+
+/**
+  Much like priqueue_at, but returns the node, instead of the data in it.
+*/
 
 node_t *priqueue_node_at(priqueue_t *q, int index)
 {
@@ -169,19 +198,21 @@ void *priqueue_at(priqueue_t *q, int index)
   @return the number of entries removed
  */
 int priqueue_remove(priqueue_t *q, void *ptr)
-{
-  int entries_removed = 0;
+{  
   assert(q != NULL);
+  int entries_removed = 0;
   if(q->size > 0){
-    if(q->head->data == ptr){
-      remove_queue_head(q);
-      entries_removed++;
-    }
-    for(node_t* node = q->head; node != NULL; node = node->next){
+    for(node_t* node = q->head; node->next != NULL;){
       if(node->next->data == ptr){
         remove_next_node(q,node);
         entries_removed++;
       }
+      else
+        node = node->next;
+    }
+    if(q->head->data == ptr){
+      remove_queue_head(q);
+      entries_removed++;
     }
   }
 	return entries_removed;
