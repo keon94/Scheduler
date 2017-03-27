@@ -9,8 +9,13 @@
 
 
 
-//This queue is implemented as a single linked list
+//This queue is implemented as a single linked list. 
+//deletion is done from the tail side.
+/*insertion starts from the head side, but may occur at an intermediate node 
+  in the queue depending on the result of the comparator function at every node.*/
 //Diagram:   Head -> . -> . -> .... -> . -> Tail => NULL
+
+
 node_t* node_init(void* data, node_t* next){
   node_t *node = malloc(sizeof(node_t));
   node->data = data;
@@ -83,30 +88,24 @@ int priqueue_offer(priqueue_t *q, void *ptr)
 {
     assert(q != NULL);
     int index = 0;
-    if(q->size == 0){
+    if(q->size == 0)
         q->head =  q->tail = node_init(ptr, NULL);
-    }
     else{
-      node_t *new_node;
-      if(q->comparer(ptr, q->head->data) <= 0){ //inserting to the head of the queue
-          new_node = node_init(ptr, q->head);
-          q->head = new_node;
-      }
+      if(q->comparer(ptr, q->head->data) <= 0) //inserting to the head of the queue
+          q->head = node_init(ptr, q->head);
       else{
         node_t *node;
         for(node = q->head; node->next != NULL; node = node->next){ //inserting elsewhere in the queue
           index++;
-          if(q->comparer(ptr, node->next->data) <= 0){
-              new_node = node_init(ptr, node->next);
-              node->next = new_node;
+          if(q->comparer(ptr, node->next->data) <= 0){ //insert when comparer(a,b) gives a <= b (a-b <= 0)
+              node->next = node_init(ptr, node->next);
               break;
           }
         }
         if(!node->next){  //inserting to the tail of the queue
             index++;
-            new_node = node_init(ptr, NULL);
-            node->next = new_node;
-            q->tail = new_node;
+            node->next = node_init(ptr, NULL);
+            q->tail = node->next;
         }        
       }
     }

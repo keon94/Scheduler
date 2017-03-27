@@ -9,6 +9,9 @@
 #include "../libpriqueue/libpriqueue.h"
 
 
+
+typedef enum {IDLE = -1, SUSPENDED, RUNNING} job_state_t;
+
 /**
   Stores information making up a job to be scheduled including any statistics.
 
@@ -16,8 +19,39 @@
 */
 typedef struct _job_t
 {
+  int job_number;
+  int running_time;
+  int priority;
+  job_state_t state;
 
 } job_t;
+
+
+
+struct _global_state
+{
+  int cores;
+  int time;
+} global_state;
+
+int comparer_FCFS(const void* job1, const void* job2){
+  return ((job_t*)job1)->job_number - ((job_t*)job2)->job_number;
+}
+
+int comparer_SJF(const void* job1, const void* job2){return 0;}
+int comparer_PSJF(const void* job1, const void* job2){return 0;}
+int comparer_PRI(const void* job1, const void* job2){return 0;}
+int comparer_PPRI(const void* job1, const void* job2){return 0;}
+int comparer_RR(const void* job1, const void* job2){return 0;}
+
+int (*comparers[6]) (const void*,const void*) = {comparer_FCFS, 
+                                                comparer_SJF,
+                                                comparer_PSJF,
+                                                comparer_PRI,
+                                                comparer_PPRI,
+                                                comparer_RR};
+        
+priqueue_t* priqueues;
 
 
 /**
@@ -34,7 +68,10 @@ typedef struct _job_t
 */
 void scheduler_start_up(int cores, scheme_t scheme)
 {
-
+  global_state.cores = cores;
+  priqueues = malloc(cores*sizeof(priqueue_t));
+  for(int core = 0; core < cores; ++core)
+     priqueue_init(&priqueues[core], comparers[scheme]); 
 }
 
 
@@ -60,6 +97,23 @@ void scheduler_start_up(int cores, scheme_t scheme)
  */
 int scheduler_new_job(int job_number, int time, int running_time, int priority)
 {
+  global_state.time = time;
+  job_t *job = malloc(sizeof(job_t));  
+  job->job_number = job_number;
+  job->running_time = running_time;
+  job->priority = priority;
+  //first check for idle cores
+  for(int core = 0; core < global_state.cores; ++core){
+    if(priqueue_size(&priqueues[core]) == 0){  //implies the core is idle
+      priqueue_offer(&priqueues[core], job); 
+      return core;
+    }
+  }
+
+ 
+  
+
+
 	return -1;
 }
 
