@@ -53,9 +53,18 @@ int comparer_PSJF(const void* job1, const void* job2){
     return ((job_t*)job1)->arrival_time - ((job_t*)job2)->arrival_time;
   return result;
 }
-int comparer_PRI(const void* job1, const void* job2){return 0;}
-int comparer_PPRI(const void* job1, const void* job2){return 0;}
-int comparer_RR(const void* job1, const void* job2){return 0;}
+int comparer_PRI(const void* job1, const void* job2){
+  int result = ((job_t*)job2)->priority - ((job_t*)job1)->priority;
+  if(result == 0)
+    return ((job_t*)job1)->arrival_time - ((job_t*)job2)->arrival_time;
+  return result;
+}
+int comparer_PPRI(const void* job1, const void* job2){
+  return comparer_PRI(job1,job2);
+}
+int comparer_RR(const void* job1, const void* job2){
+  return 0;
+}
 
 int (*comparers[6]) (const void*,const void*) = {comparer_FCFS, 
                                                 comparer_SJF,
@@ -99,9 +108,9 @@ void scheduler_start_up(int cores, scheme_t scheme)
      priqueue_init(&priqueues[core], comparers[scheme]); 
 }
 
-/*sets the core on which the next job must be scheduled. The core
+/*sets the core on which the newly received job must be scheduled. The core
   will be selected in such a way to balance the total load on all cores.*/ 
-void set_next_schedulable_core(){
+void set_schedulable_core(){
   int smallest_core = 0;
   for(int core = 0; core < global_state.cores; ++core){
     if(priqueue_size(&priqueues[core]) < priqueue_size(&priqueues[smallest_core])){
@@ -140,7 +149,11 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   job->remaining_time = running_time;
   job->arrival_time = time;
   job->priority = priority;
-
+ 
+  //determine which core must take the arrived job
+  set_schedulable_core();
+  
+  
   int queue_size = priqueue_size(&priqueues[global_state.schedulable_core]);
   int schedulable_core = global_state.schedulable_core;
   int empty_queue = queue_size == 0;
@@ -152,27 +165,28 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   //schedule the job on the schedulable core
   switch(global_state.scheme){
     case FCFS:
-      priqueue_offer(&priqueues[global_state.schedulable_core], job); //push to the queue. the comparator function should take care of the location within the queue.
+      priqueue_offer(&priqueues[schedulable_core], job); //push to the queue. the comparator function should take care of the location within the queue.
       break;
     case PSJF:
-      if(priqueue_offer(&priqueues[global_state.schedulable_core], job) == -1) //if insertion was done at the tail
+    case PPRI:
+      if(priqueue_offer(&priqueues[schedulable_core], job) == queue_size) //if insertion was done at the tail
       {
         preempt = 1;
       }
       break;
     case SJF:
-      if(priqueue_offer(&priqueues[global_state.schedulable_core], job) == queue_size) //if insertion was done at the tail. nore: queue_size has increased by 1 upon calling offer()
+    case PRI:
+      if(priqueue_offer(&priqueues[schedulable_core], job) == queue_size) //if insertion was done at the tail. nore: queue_size has increased by 1 upon calling offer()
       {
         //we must let the current job (at the tail) finish.
         //having entered the body of this if block, offer() will have placed the new job at the tail of the queue, though it should be placed one step next to the tail, which is what this code does
         if(queue_size > 1)
-          swap(&priqueues[global_state.schedulable_core], queue_size-1, queue_size);
+          swap(&priqueues[schedulable_core], queue_size-1, queue_size);
       }
       break;
     default:{} 
   }
-  //determine which core must take the next job that arrives
-  set_next_schedulable_core();
+   
   //if this core's queue was empty (available), return this core, for it will start running this job right now
   if(empty_queue || preempt){
     return schedulable_core;
@@ -197,14 +211,11 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
  */
 int scheduler_job_finished(int core_id, int job_number, int time)
 {
-  priqueue_poll(&priqueues[core_id]); //remove the finished job from this core's queue (tail);
-  int next_job_number;
+  free(priqueue_poll(&priqueues[core_id])); //remove the finished job from this core's queue (tail);
   if(priqueue_size(&priqueues[core_id]) == 0)
     return -1; //there's no next job on this queue
-  next_job_number = ((job_t*)priqueue_peek(&priqueues[core_id]))->job_number; //get the next job on this queue
-  if(core_id == global_state.schedulable_core) //if the given core is to run the next job in the next cycle, return the next job number
-	  return next_job_number;
-  return -1; //otherwise the given core will idle
+  int next_job_number = ((job_t*)priqueue_peek(&priqueues[core_id]))->job_number; //get the next job on this queue
+	return next_job_number;
 }
 
 
@@ -295,7 +306,7 @@ void scheduler_show_queue()
   for(int core = 0; core < global_state.cores; ++core){
     printf("  Core %d Queue: ", core);
     for(node_t *node = (&priqueues[core])->head; node != NULL; node = node->next){
-      printf("%d [%d,%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time);
+      printf("%d [%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time, ((job_t*)node->data)->priority);
     }
     printf("\n");
   }

@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceRoot}/simulator",
-            "args": ["-c", "1", "-s", "sjf", "examples/proc2.csv"],
+            "args": ["-c", "2", "-s", "fcfs", "examples/proc2.csv"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
