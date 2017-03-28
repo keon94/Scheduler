@@ -131,6 +131,28 @@ void *priqueue_peek(priqueue_t *q)
     return q->tail->data;
 }
 
+//swaps the data at the given indices. 
+void swap(priqueue_t *q, int index1, int index2){
+  if(index1 > index2){
+    swap(q, index2, index1);
+  }
+  else{
+    node_t *node1, *node2; 
+    int count = 0;
+    for(node_t* node = q->head;; node = node->next, ++count){
+      if(count == index1)
+        node1 = node;
+      else if(count == index2){
+        node2 = node;
+        break;
+      }
+    }
+    void* temp = node1->data;
+    node1->data = node2->data;
+    node2->data = temp;
+  }
+}
+
 
 /**
   Retrieves and removes the tail of this queue, or NULL if this queue
