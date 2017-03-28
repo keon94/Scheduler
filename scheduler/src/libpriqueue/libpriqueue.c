@@ -131,6 +131,7 @@ void *priqueue_peek(priqueue_t *q)
     return q->tail->data;
 }
 
+
 //swaps the data at the given indices. 
 void swap(priqueue_t *q, int index1, int index2){
   if(index1 > index2){

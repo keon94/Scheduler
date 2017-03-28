@@ -180,10 +180,13 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
       {
         //we must let the current job (at the tail) finish.
         //having entered the body of this if block, offer() will have placed the new job at the tail of the queue, though it should be placed one step next to the tail, which is what this code does
-        if(queue_size > 1)
+        if(queue_size >= 1) //implies a size of 2 or more 
           swap(&priqueues[schedulable_core], queue_size-1, queue_size);
       }
       break;
+    case RR:
+      //TODO: Round Robin Scheduling
+    break;
     default:{} 
   }
    
@@ -192,6 +195,19 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
     return schedulable_core;
   }
 	return -1;
+}
+
+//transfers a job from origin queue to dest queue. only the job first in line in the queue (next to the tail) is transferred.
+//for this program, it is expected that dest_queue is an empty queue, but generally it doesn't have to be for this function to work
+//returns the job number of the job that was transferred. -1 if the origin queue is smaller than 2 in size
+int transfer_job(priqueue_t *origin_queue, priqueue_t *dest_queue){
+  int origin_size = priqueue_size(origin_queue);
+  if(origin_size > 1){
+    job_t *origin_job = priqueue_remove_at(origin_queue, origin_size - 2);
+    priqueue_offer(dest_queue, origin_job);
+    return origin_job->job_number;
+  }
+  return -1;
 }
 
 
@@ -212,9 +228,20 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
 int scheduler_job_finished(int core_id, int job_number, int time)
 {
   free(priqueue_poll(&priqueues[core_id])); //remove the finished job from this core's queue (tail);
-  if(priqueue_size(&priqueues[core_id]) == 0)
-    return -1; //there's no next job on this queue
-  int next_job_number = ((job_t*)priqueue_peek(&priqueues[core_id]))->job_number; //get the next job on this queue
+  int next_job_number;
+  if(priqueue_size(&priqueues[core_id]) == 0){ //there's no next job on this queue (it's empty)
+    //look for outstanding jobs in other queues (starting from core 0). if found, grab the first in line and execute it on this core
+    for(int core = 0; core < global_state.cores; ++core){
+      if(core != core_id){
+        next_job_number = transfer_job(&priqueues[core], &priqueues[core_id]); //transfer the first queued job to this queue, which is empty
+        if(next_job_number != -1)
+          return next_job_number;      
+      }
+    }
+    //if no other filled queues on other cores, idle this core
+    return -1; 
+  }
+  next_job_number = ((job_t*)priqueue_peek(&priqueues[core_id]))->job_number; //get the next job on this queue
 	return next_job_number;
 }
 
