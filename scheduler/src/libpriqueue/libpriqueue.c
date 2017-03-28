@@ -146,7 +146,7 @@ void *priqueue_poll(priqueue_t *q)
   if(q->size == 0)
 	  return NULL;
   else
-    return priqueue_remove_at(q,0); //tail index is 0
+    return priqueue_remove_at(q,q->size-1); //head index is 0, so tail is at size-1
 
 }
 
