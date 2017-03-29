@@ -7,6 +7,7 @@
 #include "libpriqueue/libpriqueue.h"
 
 void print(priqueue_t *q){
+	printf("Queue: ");
 	for(node_t *n = q->head; n != NULL; n = n->next){
 		printf("%d ", *(int*)n->data);
 	}
@@ -39,13 +40,18 @@ int main()
 
 	/* Add 5 values, 3 unique. */
 	priqueue_offer(&q, &values[12]);
+	print(&q);
 	priqueue_offer(&q, &values[13]);
+	print(&q);
 	priqueue_offer(&q, &values[14]);
+	print(&q);
 	priqueue_offer(&q, &values[12]);
+	print(&q);
 	priqueue_offer(&q, &values[12]);
 	printf("Total elements: %d (expected 5).\n", priqueue_size(&q));
 
 	print(&q);
+	//printf("tail: %d\n",*((int *)priqueue_peek(&q)));
 	int val = *((int *)priqueue_poll(&q));
 	
 	printf("Top element: %d (expected 12).\n", val);
@@ -57,13 +63,18 @@ int main()
 	print(&q);
 
 	priqueue_offer(&q, &values[10]);
+	print(&q);
 	priqueue_offer(&q, &values[30]);
+	print(&q);
 	priqueue_offer(&q, &values[20]);
+	print(&q);
 
 	priqueue_offer(&q2, &values[10]);
+	print(&q2);
 	priqueue_offer(&q2, &values[30]);
+	print(&q2);
 	priqueue_offer(&q2, &values[20]);
-
+	print(&q2);
 
 	printf("Elements in order queue (expected 10 13 14 20 30): ");
 	for (i = 0; i < priqueue_size(&q); i++)

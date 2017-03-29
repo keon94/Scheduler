@@ -1,12 +1,15 @@
 {
     "version": "0.2.0",
     "configurations": [
+        
         {
             "name": "C++ Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/simulator",
-            "args": ["-c", "2", "-s", "pri", "examples/proc2.csv"],
+            //"program": "${workspaceRoot}/simulator",
+            //"args": ["-c", "2", "-s", "pri", "examples/proc2.csv"],
+            "program": "${workspaceRoot}/queuetest",
+            "args" : [],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],

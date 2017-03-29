@@ -9,6 +9,7 @@
 
 
 
+
 //This queue is implemented as a single linked list. 
 //deletion is done from the tail side.
 /*insertion starts from the head side, but may occur at an intermediate node 
@@ -16,45 +17,55 @@
 //Diagram:   Head -> . -> . -> .... -> . -> Tail => NULL
 
 
-node_t* node_init(void* data, node_t* next){
+node_t* node_init(void* data, node_t* prev, node_t* next){
   node_t *node = malloc(sizeof(node_t));
   node->data = data;
+  node->prev = prev;
   node->next = next;
   return node;
 }
 
-//Removes the node next to the supplied node from queue q. This is the 
-//only way to remove an intermediate node in a single linked list.
-//Returns the data of the deleted node
-void* remove_next_node(priqueue_t *q, node_t* node){
+void* remove_node(priqueue_t* q, node_t* n){
     assert(q != NULL);
-    assert(node != NULL);
+    assert(n != NULL);
     assert(q->size > 0);
-    node_t *next = node->next;
-    if(!next)
-      return NULL;
-    else{
-      node->next = node->next->next;
-      void* next_data = next->data;
-      free(next);
-      q->size--;
-      if(!node->next)
-        q->tail = node;
-      return next_data;
-    }
+    if(n->prev)
+        n->prev->next = n->next;
+    else
+        q->head = n->next;  
+    if(n->next)
+        n->next->prev = n->prev;
+    else
+        q->tail = n->prev;
+    void* n_data = n->data;
+    free(n);
+    q->size--;
+    return n_data;
 }
 
-/**
-  Removes the head of the queue, making the next node in the queue the new head.
-  Returns the data pointer from the old head
-*/
-void* remove_queue_head(priqueue_t* q){
-    node_t *head = q->head;
-    q->head = head->next;
-    void* head_data = head->data;
-    free(head);
-    q->size--;
-    return head_data;
+//inserts a new node with data 'data' before node 'n' (in queue 'q') (relative to the tail of q)
+//if n is null, it is assumed we are inserting to the tail of the queue
+void insert_node(priqueue_t* q, void* data, node_t* n){
+  assert(q != NULL);
+  node_t *new_node;  
+  if(n){
+    new_node = node_init(data, n, n->next);
+    if(n->next)
+      n->next->prev = new_node;
+    else //we are at the tail
+      q->tail = new_node;
+    n->next = new_node;     
+  }
+  else{ //we are at the head
+    new_node = node_init(data, NULL, q->head);
+    if(q->size == 0)
+      q->tail = q->head = new_node;
+    else{
+      q->head->prev = new_node;
+      q->head = new_node;
+    }      
+  }
+  q->size++;
 }
 
 
@@ -88,28 +99,20 @@ int priqueue_offer(priqueue_t *q, void *ptr)
 {
     assert(q != NULL);
     int index = 0;
-    if(q->size == 0)
-        q->head =  q->tail = node_init(ptr, NULL);
-    else{
-      if(q->comparer(ptr, q->head->data) <= 0) //inserting to the head of the queue
-          q->head = node_init(ptr, q->head);
-      else{
-        node_t *node;
-        for(node = q->head; node->next != NULL; node = node->next){ //inserting elsewhere in the queue
-          index++;
-          if(q->comparer(ptr, node->next->data) <= 0){ //insert when comparer(a,b) gives a <= b (a-b <= 0)
-              node->next = node_init(ptr, node->next);
-              break;
-          }
-        }
-        if(!node->next){  //inserting to the tail of the queue
-            index++;
-            node->next = node_init(ptr, NULL);
-            q->tail = node->next;
-        }        
-      }
+    if(q->size == 0){
+      insert_node(q, ptr, NULL);
     }
-    q->size++;
+    else{
+      for(node_t *node = q->tail; node != NULL; node = node->prev){
+          index++;
+          if(q->comparer(ptr, node->data) <= 0){ //insert when comparer(a,b) gives a <= b (a-b <= 0)
+            insert_node(q, ptr, node);
+            return index;
+          }
+      }
+      index++;
+      insert_node(q, ptr, NULL);
+    }
 	  return index;
 }
 
@@ -131,13 +134,32 @@ void *priqueue_peek(priqueue_t *q)
     return q->tail->data;
 }
 
+/**
+  Retrieves, but does not remove, the head of this queue, returning NULL if
+  this queue is empty.
+ 
+  @param q a pointer to an instance of the priqueue_t data structure
+  @return pointer to element at the head of the queue
+  @return NULL if the queue is empty
+ */
+void *priqueue_peek_head(priqueue_t *q)
+{
+	assert(q != NULL);
+  if(q->size == 0)
+    return NULL;
+  else
+    return q->head->data;
+}
+
 
 //swaps the data at the given indices. 
 void swap(priqueue_t *q, int index1, int index2){
+  assert(q != NULL);
   if(index1 > index2){
     swap(q, index2, index1);
   }
   else{
+    assert(index1 >= 0 && index2 < q->size);
     node_t *node1, *node2; 
     int count = 0;
     for(node_t* node = q->head;; node = node->next, ++count){
@@ -169,13 +191,29 @@ void *priqueue_poll(priqueue_t *q)
   if(q->size == 0)
 	  return NULL;
   else
-    return priqueue_remove_at(q,q->size-1); //head index is 0, so tail is at size-1
+    return remove_node(q, q->tail);
+}
 
+/**
+  Retrieves and removes the head of this queue, or NULL if this queue
+  is empty.
+ 
+  @param q a pointer to an instance of the priqueue_t data structure
+  @return the head of this queue
+  @return NULL if this queue is empty
+ */
+void *priqueue_poll_head(priqueue_t *q)
+{
+  assert(q != NULL);
+  if(q->size == 0)
+	  return NULL;
+  else
+    return remove_node(q, q->head);
 }
 
 
 /**
-  Much like priqueue_at, but returns the node, instead of the data in it.
+  Used by priqueue_at. Returns the node at the given index (relative to the tail)
 */
 
 node_t *priqueue_node_at(priqueue_t *q, int index)
@@ -184,8 +222,8 @@ node_t *priqueue_node_at(priqueue_t *q, int index)
   if(index >= q->size || index < 0)
 	  return NULL;
   else{
-    node_t* node = q->head;
-    for(int i = 0 ; i < index; node = node->next, ++i);
+    node_t* node = q->tail;
+    for(int i = 0 ; i < index; node = node->prev, ++i);
     return node;
   }
 }
@@ -223,18 +261,14 @@ int priqueue_remove(priqueue_t *q, void *ptr)
 {  
   assert(q != NULL);
   int entries_removed = 0;
+  node_t* next_node;
   if(q->size > 0){
-    for(node_t* node = q->head; node->next != NULL;){
-      if(node->next->data == ptr){
-        remove_next_node(q,node);
+    for(node_t* node = q->head; node != NULL; node = next_node){
+      next_node = node->next;
+      if(node->data == ptr){
+        remove_node(q, node);
         entries_removed++;
       }
-      else
-        node = node->next;
-    }
-    if(q->head->data == ptr){
-      remove_queue_head(q);
-      entries_removed++;
     }
   }
 	return entries_removed;
@@ -255,9 +289,7 @@ void *priqueue_remove_at(priqueue_t *q, int index)
 	assert(q != NULL);
   if(index < 0 || index >= q->size)
     return NULL;
-  if(index - 1 < 0)
-    return remove_queue_head(q);
-  return remove_next_node(q, priqueue_node_at(q,index-1));
+  return remove_node(q, priqueue_node_at(q,index));
 }
 
 
@@ -282,8 +314,9 @@ int priqueue_size(priqueue_t *q)
 void priqueue_destroy(priqueue_t *q)
 {
   assert(q != NULL);
-  for(node_t* node = q->head; node->next != NULL;){
-    remove_next_node(q, node);    
+  node_t *next_node;
+  for(node_t* node = q->head; node != NULL; node = next_node){
+    next_node = node->next;
+    remove_node(q, node);    
   }
-  free(q->head);
 }
