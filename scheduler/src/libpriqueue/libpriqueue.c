@@ -44,7 +44,7 @@ void* remove_node(priqueue_t* q, node_t* n){
 }
 
 //inserts a new node with data 'data' before node 'n' (in queue 'q') (relative to the tail of q)
-//if n is null, it is assumed we are inserting to the tail of the queue
+//if n is null, it is assumed we are inserting to the head of the queue
 void insert_node(priqueue_t* q, void* data, node_t* n){
   assert(q != NULL);
   node_t *new_node;  
@@ -152,7 +152,7 @@ void *priqueue_peek_head(priqueue_t *q)
 }
 
 
-//swaps the data at the given indices. 
+//swaps the data at the given indices, relative to the tail of q 
 void swap(priqueue_t *q, int index1, int index2){
   assert(q != NULL);
   if(index1 > index2){
@@ -162,7 +162,7 @@ void swap(priqueue_t *q, int index1, int index2){
     assert(index1 >= 0 && index2 < q->size);
     node_t *node1, *node2; 
     int count = 0;
-    for(node_t* node = q->head;; node = node->next, ++count){
+    for(node_t* node = q->tail;; node = node->prev, ++count){
       if(count == index1)
         node1 = node;
       else if(count == index2){
