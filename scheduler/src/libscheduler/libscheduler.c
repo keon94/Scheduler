@@ -86,25 +86,29 @@ void show_queue2(){
 
 //called when the scheme is preemptive. called when a 'superior' job arrives and must preempt the currently running one (push it back in the queue)
 //target_core must have a value of -1
-void preemptive_offer(job_t *new_job, int *target_core){
-    job_t* running_job; 
-    int comparison = 0, minimum = comparison;
-    for(int core = 0; core < global_state.cores; ++core){
-      //in each core, look for an "inferior" running job. if found, prempt it.
-      if((running_job = global_state.active_jobs[core]) && (comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison < minimum){ //we shall premept the running job in this case    
+void preemptive_offer(job_t *new_job, int *target_core){  //this function will be reached only when all cores are active, so the running job can never be null
+    job_t* running_job = global_state.active_jobs[0]; 
+    int comparison;
+    int maximum_comparsion = priqueue.comparer(new_job , running_job); //maximum_comparsion used to find the maximum_comparsion rem time or priority value among the currently active jobs
+                                                            //initialised to core 0's comparsion result
+    //preempt core 0 if necessary.
+    if(maximum_comparsion  > 0)  
+      *target_core = 0;    
+    //in each core, starting from core 1, look for an "inferior" running job. if found, prempt it.
+    for(int core = 1; core < global_state.cores; ++core){   
+      running_job = global_state.active_jobs[core];  
+      if((comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison > maximum_comparsion){ //we shall premept the running job in this case    
         *target_core = core;
-        minimum = comparison;
+        maximum_comparsion = comparison;
       }
     }
-
     if(*target_core == -1)
-      priqueue_offer(&priqueue, new_job); //simply enqueue this new job if no premptible cores
+      priqueue_offer(&priqueue, new_job); //simply enqueue this new job, since no cores had to be preempted
     else{
-      priqueue_offer(&priqueue, running_job);
+      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
       global_state.active_jobs[*target_core] = new_job;
       printf("\n\n******job %d prempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
-
 }
 
 void update_remaining_times(int current_time){
