@@ -92,7 +92,7 @@ void preemptive_offer(job_t *new_job, int *target_core){  //this function will b
     int maximum_comparsion = priqueue.comparer(new_job , running_job); //maximum_comparsion used to find the maximum_comparsion rem time or priority value among the currently active jobs
                                                             //initialised to core 0's comparsion result
     //preempt core 0 if necessary.
-    if(maximum_comparsion  > 0)  
+    if(maximum_comparsion > 0)  
       *target_core = 0;    
     //in each core, starting from core 1, look for an "inferior" running job. if found, prempt it.
     for(int core = 1; core < global_state.cores; ++core){   
@@ -105,9 +105,9 @@ void preemptive_offer(job_t *new_job, int *target_core){  //this function will b
     if(*target_core == -1)
       priqueue_offer(&priqueue, new_job); //simply enqueue this new job, since no cores had to be preempted
     else{
-      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
+      priqueue_offer(&priqueue, global_state.active_jobs[*target_core]); //a core was preempted, thus swap its running job with the new one, and enqueue that job
       global_state.active_jobs[*target_core] = new_job;
-      printf("\n\n******job %d prempted job %d*******\n\n", new_job->job_number, running_job->job_number);
+      printf("\n\n******job %d preempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
 }
 
