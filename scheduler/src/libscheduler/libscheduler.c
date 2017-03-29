@@ -46,19 +46,19 @@ int comparer_FCFS(const void* job1, const void* job2){  //insertion when compare
 int comparer_SJF(const void* job1, const void* job2){
   int result = ((job_t*)job2)->running_time - ((job_t*)job1)->running_time;
   if(result == 0)
-    return ((job_t*)job1)->arrival_time - ((job_t*)job2)->arrival_time;
+    return ((job_t*)job2)->arrival_time - ((job_t*)job1)->arrival_time;
   return result;
 }
 int comparer_PSJF(const void* job1, const void* job2){  
   int result = ((job_t*)job2)->remaining_time - ((job_t*)job1)->remaining_time;
   if(result == 0)
-    return ((job_t*)job1)->arrival_time - ((job_t*)job2)->arrival_time;
+    return ((job_t*)job2)->arrival_time - ((job_t*)job1)->arrival_time;
   return result;
 }
 int comparer_PRI(const void* job1, const void* job2){
   int result = ((job_t*)job2)->priority - ((job_t*)job1)->priority;
   if(result == 0)
-    return ((job_t*)job1)->arrival_time - ((job_t*)job2)->arrival_time;
+    return ((job_t*)job2)->arrival_time - ((job_t*)job1)->arrival_time;
   return result;
 }
 int comparer_PPRI(const void* job1, const void* job2){
@@ -206,8 +206,11 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
       default:{} 
     }
   }
+  else{
+    global_state.active_jobs[target_core] = job;
+  }
    
-  //if this core's queue was empty (available), return this core, for it will start running this job right now
+  //target_core will be -1 if this new job was pushed to the queue. otherwise it will be the core number on which this job will begin execution right away.
   return target_core;
 }
 
