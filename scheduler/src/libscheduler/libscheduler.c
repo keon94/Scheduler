@@ -77,41 +77,42 @@ int (*comparers[6]) (const void*,const void*) = {comparer_FCFS,
         
 priqueue_t priqueue;
 
+void show_queue2(){
+      for(node_t *node = priqueue.tail; node != NULL; node = node->prev){
+      printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time, ((job_t*)node->data)->priority);
+    }
+}
+
 
 //called when the scheme is preemptive. called when a 'superior' job arrives and must preempt the currently running one (push it back in the queue)
-void preemptive_offer(job_t *new_job, int target_core){
-  if(target_core != -1){
-    job_t* running_job = global_state.active_jobs[target_core];
-    if(running_job && (priqueue.comparer(new_job, running_job) <= 0)){
-      priqueue_offer(&priqueue, running_job);
-      global_state.active_jobs[target_core] = new_job;
+//target_core must have a value of -1
+void preemptive_offer(job_t *new_job, int *target_core){
+    job_t* running_job; 
+    int comparison = 0, minimum = comparison;
+    for(int core = 0; core < global_state.cores; ++core){
+      //in each core, look for an "inferior" running job. if found, prempt it.
+      if((running_job = global_state.active_jobs[core]) && (comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison < minimum){ //we shall premept the running job in this case    
+        *target_core = core;
+        minimum = comparison;
+      }
     }
+
+    if(*target_core == -1)
+      priqueue_offer(&priqueue, new_job); //simply enqueue this new job if no premptible cores
     else{
-      priqueue_offer(&priqueue, new_job);
+      priqueue_offer(&priqueue, running_job);
+      global_state.active_jobs[*target_core] = new_job;
+      printf("\n\n******job %d prempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
-  }
-  /*
-  else{ //target core of -1 means there were no idle cores
-    switch(global_state.scheme){
-      case PSJF:
-        int longest_rem_time = 0;
-        for(int core = 0; core < global_state.cores; ++core){ //preempt the running job with the longest remaining times
-          if(global_state.active_jobs[core]->remaining_time > longest_rem_time){
-            longest_rem_time = global_state.active_jobs[core]->remaining_time;
-            target_core = core;
-          }
-          return target_core;
-        }
-
-  }*/
-
-
 
 }
 
-void update_remaining_time(job_t* job, int current_time){
-  if(job)
-    job->remaining_time = job->running_time - (current_time - job->arrival_time);
+void update_remaining_times(int current_time){
+  job_t* active_job;
+  for(int core = 0; core < global_state.cores; ++core){
+    if((active_job = global_state.active_jobs[core])) //update the job's rem time only if one exists on the core!
+      active_job->remaining_time = active_job->running_time - (current_time - active_job->arrival_time);
+  }
 }
 
 /**
@@ -182,17 +183,18 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   int currently_schedulable = target_core != -1;
 
 
-  //update the rem time of the active job 
-  update_remaining_time((job_t*)priqueue_peek_head(&priqueue), time); 
+  //update the rem time of the active jobs 
+  update_remaining_times(time); 
   
+  //in premptive scheduling, the newly arrived job must be compared against the currently 
+  //running job and, if necessary, prempt it, thereby enqueuing that running job and replacing it
+  //on the active job list
   switch(global_state.scheme){
-    case PSJF:
-    case PPRI:
-      preemptive_offer(job, target_core);
-    break;
+
     default:{}
   }
   
+  //if not currenlty schedulabe, the job must be added to the queue
   if(!currently_schedulable){
     switch(global_state.scheme){
       case FCFS:
@@ -200,6 +202,10 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
       case PRI:
         priqueue_offer(&priqueue, job); //push to the queue. the comparator function should take care of the location within the queue.
         break;
+      case PSJF:
+      case PPRI:
+      preemptive_offer(job, &target_core);
+      break;
       case RR:
         //TODO: Round Robin Scheduling
       break;
@@ -232,8 +238,10 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
  */
 int scheduler_job_finished(int core_id, int job_number, int time)
 { 
+  printf("\nBefore Poll: "); show_queue2();
   job_t* next_job = priqueue_poll_head(&priqueue);
-  free(global_state.active_jobs[core_id]);
+  printf("\nAfter Poll: "); show_queue2(); printf("\n");
+  free(global_state.active_jobs[core_id]); //free the currently active job
   if(next_job){
     global_state.active_jobs[core_id] = next_job;
     return next_job->job_number;
@@ -334,11 +342,14 @@ void scheduler_show_queue()
     for(int core = 0; core < global_state.cores; ++core)
       printf("  %d;", global_state.core_states[core]);
     printf("\n\n  ---------------\n  Active Jobs\n");
-    job_t* j; int jnum;
+    job_t* j;
     for(int core = 0; core < global_state.cores; ++core){
-      j = global_state.active_jobs[core]; 
-      if(!j) jnum = -1; else jnum = j->job_number;       
-      printf("  %d;", jnum);
+      if((j = global_state.active_jobs[core]))     
+        printf("  %d[%d,%d;%d] ;", j->job_number, j->remaining_time, j->running_time, j->priority);
+      else
+        printf("  %d[%d,%d;%d] ;", -1,-1,-1,-1);
     }
     printf("\n  ---------------");
 }
+
+
