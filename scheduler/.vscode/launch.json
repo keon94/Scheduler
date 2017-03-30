@@ -7,7 +7,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceRoot}/simulator",
-            "args": ["-c", "1", "-s", "psjf", "examples/proc3.csv"],
+            "args": ["-c", "4", "-s", "ppri", "examples/proc3.csv"],
             //"program": "${workspaceRoot}/queuetest",
             //"args" : [],
             "stopAtEntry": false,
