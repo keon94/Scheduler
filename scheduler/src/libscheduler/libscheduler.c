@@ -19,9 +19,11 @@
 typedef struct _job_t
 {
   int job_number;
-  int running_time;
-  int remaining_time;
-  int arrival_time;
+  int running_time; //total time for the job
+  int remaining_time; //time left until job finishes
+  int last_active_time; //the last time we updated remaining time
+  int active_time;  //total time the job has been active (running)
+  int arrival_time; //time at which the job arrived
   int priority;
 
 } job_t;
@@ -38,7 +40,7 @@ struct _global_state
 } global_state;
 
 
-
+//return <= 0 job1 > job 2
 int comparer_FCFS(const void* job1, const void* job2){  //insertion when compare(new_val,existing_val) <= 0
   return ((job_t*)job2)->job_number - ((job_t*)job1)->job_number;  //when job1 # is greater than the existing job2 #, insert
 }
@@ -83,41 +85,54 @@ void show_queue2(){
     }
 }
 
+//called also when an active job is about to terminate
+void update_active_job_timings(job_t* active_job, int time){
+      active_job->active_time += time - active_job->last_active_time;
+      active_job->last_active_time = time;
+      active_job->remaining_time = active_job->running_time - active_job->active_time;
+}
+
+void update_all_active_jobs_timings(int current_time){
+  job_t* active_job;
+  for(int core = 0; core < global_state.cores; ++core){
+    if((active_job = global_state.active_jobs[core])){//update the job's rem time only if one exists on the core!
+      update_active_job_timings(active_job, current_time);
+    }
+  }
+}
+
 
 //called when the scheme is preemptive. called when a 'superior' job arrives and must preempt the currently running one (push it back in the queue)
 //target_core must have a value of -1
-void preemptive_offer(job_t *new_job, int *target_core){  //this function will be reached only when all cores are active, so the running job can never be null
+void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //this function will be reached only when all cores are active, so the running job can never be null
     job_t* running_job = global_state.active_jobs[0]; 
     int comparison;
-    int maximum_comparsion = priqueue.comparer(new_job , running_job); //maximum_comparsion used to find the maximum_comparsion rem time or priority value among the currently active jobs
+    int maximum_comparison = priqueue.comparer(new_job , running_job); //maximum_comparsion used to find the maximum_comparsion rem time or priority value among the currently active jobs
                                                             //initialised to core 0's comparsion result
     //preempt core 0 if necessary.
-    if(maximum_comparsion > 0)  
+    if(maximum_comparison >= 0)  
       *target_core = 0;    
     //in each core, starting from core 1, look for an "inferior" running job. if found, prempt it.
     for(int core = 1; core < global_state.cores; ++core){   
       running_job = global_state.active_jobs[core];  
-      if((comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison > maximum_comparsion){ //we shall premept the running job in this case    
+      if((comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison > maximum_comparison){ //we shall premept the running job in this case    
         *target_core = core;
-        maximum_comparsion = comparison;
+        maximum_comparison = comparison;
       }
     }
     if(*target_core == -1)
       priqueue_offer(&priqueue, new_job); //simply enqueue this new job, since no cores had to be preempted
     else{
-      priqueue_offer(&priqueue, global_state.active_jobs[*target_core]); //a core was preempted, thus swap its running job with the new one, and enqueue that job
+      running_job = global_state.active_jobs[*target_core];
+      update_active_job_timings(running_job, current_time);
+      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
+      new_job->last_active_time = current_time;
       global_state.active_jobs[*target_core] = new_job;
       printf("\n\n******job %d preempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
 }
 
-void update_remaining_times(int current_time){
-  job_t* active_job;
-  for(int core = 0; core < global_state.cores; ++core){
-    if((active_job = global_state.active_jobs[core])) //update the job's rem time only if one exists on the core!
-      active_job->remaining_time = active_job->running_time - (current_time - active_job->arrival_time);
-  }
-}
+
 
 /**
   Initalizes the scheduler.
@@ -179,24 +194,14 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   job->job_number = job_number;
   job->running_time = running_time;
   job->remaining_time = running_time;
+  job->active_time = 0;
   job->arrival_time = time;
   job->priority = priority;
-
+  
 
   int target_core = schedulable_core(); 
   int currently_schedulable = target_core != -1;
-
-
-  //update the rem time of the active jobs 
-  update_remaining_times(time); 
   
-  //in premptive scheduling, the newly arrived job must be compared against the currently 
-  //running job and, if necessary, prempt it, thereby enqueuing that running job and replacing it
-  //on the active job list
-  switch(global_state.scheme){
-
-    default:{}
-  }
   
   //if not currenlty schedulabe, the job must be added to the queue
   if(!currently_schedulable){
@@ -208,7 +213,7 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
         break;
       case PSJF:
       case PPRI:
-      preemptive_offer(job, &target_core);
+        preemptive_offer(job, &target_core, time);
       break;
       case RR:
         //TODO: Round Robin Scheduling
@@ -217,9 +222,13 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
     }
   }
   else{
+    job->last_active_time = time;
     global_state.active_jobs[target_core] = job;
   }
    
+  //update the rem time of the active jobs 
+  update_all_active_jobs_timings(time); 
+  
   //target_core will be -1 if this new job was pushed to the queue. otherwise it will be the core number on which this job will begin execution right away.
   return target_core;
 }
@@ -245,9 +254,11 @@ int scheduler_job_finished(int core_id, int job_number, int time)
   printf("\nBefore Poll: "); show_queue2();
   job_t* next_job = priqueue_poll_head(&priqueue);
   printf("\nAfter Poll: "); show_queue2(); printf("\n");
+  update_active_job_timings(global_state.active_jobs[core_id], time);
   free(global_state.active_jobs[core_id]); //free the currently active job
   if(next_job){
     global_state.active_jobs[core_id] = next_job;
+    global_state.active_jobs[core_id]->last_active_time = time;
     return next_job->job_number;
   }
   global_state.core_states[core_id] = 0;
