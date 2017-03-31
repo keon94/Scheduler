@@ -86,11 +86,46 @@ int (*comparers[6]) (const void*,const void*) = {comparer_FCFS,
 
 
 void show_queue2(){
-    
+    /*
       for(node_t *node = priqueue.tail; node != NULL; node = node->prev){
       printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time, ((job_t*)node->data)->priority);
     }
-    
+    */
+}
+
+
+
+/**
+  Initalizes the scheduler.
+
+  Assumptions:
+    - You may assume this will be the first scheduler function called.
+    - You may assume this function will be called once once.
+    - You may assume that cores is a positive, non-zero number.
+    - You may assume that scheme is a valid scheduling scheme.
+
+  @param cores the number of cores that is available by the scheduler. These cores will be known as core(id=0), core(id=1), ..., core(id=cores-1).
+  @param scheme  the scheduling scheme that should be used. This value will be one of the six enum values of scheme_t
+*/
+void scheduler_start_up(int cores, scheme_t scheme)
+{
+  global_state.cores = cores;
+  global_state.core_states = (int*)calloc(cores,sizeof(int));
+  global_state.active_jobs = (job_t**)calloc(cores,sizeof(job_t*));
+  global_state.scheme = scheme;
+  priqueue_init(&priqueue, comparers[scheme]);
+}
+
+//checks for and returns an idle core (starting from core 0) to schedule the new job on. If no cores are idle, it will return -1
+int get_idle_core(){
+  //first look for idle cores
+  for(int core = 0; core < global_state.cores; ++core){
+    if(global_state.core_states[core] == 0){
+      global_state.core_states[core] = 1; //means that this core is now active
+      return core;
+    }
+  }
+  return -1;
 }
 
 //called also when an active job is about to terminate
@@ -136,47 +171,12 @@ void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //th
       running_job = global_state.active_jobs[*target_core];
       update_active_job_timings(running_job, current_time);
       priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
-      running_job->last_active_time = current_time;
-      running_job->last_queue_time = current_time;
+      running_job->last_active_time = running_job->last_queue_time = current_time;
       global_state.active_jobs[*target_core] = new_job;
       printf("\n\n******job %d preempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
 }
 
-
-
-/**
-  Initalizes the scheduler.
-
-  Assumptions:
-    - You may assume this will be the first scheduler function called.
-    - You may assume this function will be called once once.
-    - You may assume that cores is a positive, non-zero number.
-    - You may assume that scheme is a valid scheduling scheme.
-
-  @param cores the number of cores that is available by the scheduler. These cores will be known as core(id=0), core(id=1), ..., core(id=cores-1).
-  @param scheme  the scheduling scheme that should be used. This value will be one of the six enum values of scheme_t
-*/
-void scheduler_start_up(int cores, scheme_t scheme)
-{
-  global_state.cores = cores;
-  global_state.core_states = (int*)calloc(cores,sizeof(int));
-  global_state.active_jobs = (job_t**)calloc(cores,sizeof(job_t*));
-  global_state.scheme = scheme;
-  priqueue_init(&priqueue, comparers[scheme]);
-}
-
-//returns the core to schedule the new job on. If no cores are idle, it will return -1
-int schedulable_core(){
-  //first look for idle cores
-  for(int core = 0; core < global_state.cores; ++core){
-    if(global_state.core_states[core] == 0){
-      global_state.core_states[core] = 1; //means that this core is now active
-      return core;
-    }
-  }
-  return -1;
-}
 
 
 /**
@@ -212,25 +212,26 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   job->wait_time = 0;
   job->last_active_time = time;
 
-  int target_core = schedulable_core();
+  int target_core = get_idle_core();
   int currently_schedulable = target_core != -1;
 
   //update the rem time of the active jobs
   update_all_active_jobs_timings(time);
   
-  //if not currenlty schedulabe, the job must be added to the queue
+  //if not currenlty schedulabe (no idle cores), the job must be added to the queue, 
+  //unless it is preemptive, in which case it will first be checked against the active jobs, potentially taking their place
   if(!currently_schedulable){
-    job->last_queue_time = time;
     switch(global_state.scheme){
       case FCFS:
       case SJF:
       case PRI:
       case RR:
+        job->last_queue_time = time;
         priqueue_offer(&priqueue, job); //push to the queue. the comparator function should take care of the location within the queue.
         break;
       case PSJF:
       case PPRI:
-        preemptive_offer(job, &target_core, time);
+        preemptive_offer(job, &target_core, time); //it's a preemptive job. so only conditionally enqueue it.
         break;
       default:{}
     }
@@ -239,8 +240,6 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
     job->last_active_time = time;
     global_state.active_jobs[target_core] = job;
   }
-
-
   //target_core will be -1 if this new job was pushed to the queue. otherwise it will be the core number on which this job will begin execution right away.
   return target_core;
 }
@@ -263,23 +262,32 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
  */
 int scheduler_job_finished(int core_id, int job_number, int time)
 {
-  agg_job_completed++;
+  
   job_t* finished_job = global_state.active_jobs[core_id];
+  
+  agg_job_completed++;
   agg_job_response_time += (time - finished_job->arrival_time);
   agg_turnaround_time += (time - finished_job->rr_arrival_time);
   agg_job_wait_time += finished_job->wait_time;
-  printf("\nBefore Poll: "); show_queue2();
+  
+  //printf("\nBefore Poll: "); show_queue2();
   job_t* next_job = priqueue_poll_head(&priqueue);
-  printf("\nAfter Poll: "); show_queue2(); printf("\n");
+  //printf("\nAfter Poll: "); show_queue2(); printf("\n");
+  
   update_active_job_timings(global_state.active_jobs[core_id], time);
+  
   free(global_state.active_jobs[core_id]); //free the currently active job
   global_state.active_jobs[core_id] = NULL;
+  
   if(next_job){
-    next_job->wait_time += time - next_job->last_queue_time; //!=-1 means that it has been queued at least once
+    next_job->wait_time += time - next_job->last_queue_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
+    next_job->last_active_time = time; //this job is now active, so update its last active time
+    
     global_state.active_jobs[core_id] = next_job;
-    global_state.active_jobs[core_id]->last_active_time = time;
+    
     return next_job->job_number;
   }
+  
   global_state.core_states[core_id] = 0;
   return -1;
 }
@@ -300,19 +308,20 @@ int scheduler_job_finished(int core_id, int job_number, int time)
  */
 int scheduler_quantum_expired(int core_id, int time)
 {
-  job_t* curr_job = global_state.active_jobs[core_id];
-  curr_job->arrival_time=time;
-  priqueue_offer(&priqueue, curr_job);
-  curr_job = priqueue_poll_head(&priqueue);
-          //global_state.active_jobs[core_id]= curr_job;
-  if(!curr_job)
-  {
+  job_t *next_job, *expired_job = global_state.active_jobs[core_id];
+  
+  update_active_job_timings(expired_job, time);
+  expired_job->arrival_time = expired_job->last_active_time = expired_job->last_queue_time = time;
+  priqueue_offer(&priqueue, expired_job); //send the expired job back in the queue
+  
+  
+  next_job = priqueue_poll_head(&priqueue); //get the next waiting job in the queue, and activate it
+
+  if(!next_job)
       return -1;
-  }
-  else
-  {
-      global_state.active_jobs[core_id]=curr_job;
-      return global_state.active_jobs[core_id]->job_number;
+  else{
+      global_state.active_jobs[core_id] = next_job;
+      return next_job->job_number;
   }
 }
 
