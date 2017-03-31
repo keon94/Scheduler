@@ -8,10 +8,6 @@
 #include "libscheduler.h"
 #include "../libpriqueue/libpriqueue.h"
 
-int agg_job_wait_time=0;
-int agg_job_response_time=0;
-int agg_job_completed=0;
-int agg_turnaround_time=0;
 
 priqueue_t priqueue;
 
@@ -23,26 +19,29 @@ priqueue_t priqueue;
 typedef struct _job_t
 {
   int job_number;
-  int running_time; //total time for the job
+  int total_run_time; //total time for the job
   int remaining_time; //time left until job finishes
-  int last_active_time; //the last time we updated remaining time
-  int active_time;  //total time the job has been active (running)
+  int last_event_time; //the last time the job underwent an event (arrived, was scheduled, was enqueued)
+  int total_active_time;  //total time the job has been active (scheduled) since arrival (running)
   int arrival_time; //time at which the job arrived
   int priority;
-  int rr_arrival_time; //time at which a RR job arrived
-  int last_queue_time; //the last time when this job was enqueued 
-  int wait_time;  //total time that the job has waited in the queue
+  int last_scheduled_time; //the last time the job was scheduled
+  int last_enqueued_time; //the last time when this job was enqueued 
+  int total_wait_time;  //total time that the job has waited in the queue
 } job_t;
 
 
-
+//keeps track of the state of the program as a whole
 struct _global_state
 {
   int cores;
   int* core_states;
   job_t** active_jobs;
   scheme_t scheme;
-
+  int all_jobs_total_wait_time;
+  int all_jobs_total_response_time;
+  int all_jobs_completed;
+  int all_jobs_total_turnaround_time;
 } global_state;
 
 
@@ -52,7 +51,7 @@ int comparer_FCFS(const void* job1, const void* job2){  //insertion when compare
 }
 
 int comparer_SJF(const void* job1, const void* job2){
-  int result = ((job_t*)job2)->running_time - ((job_t*)job1)->running_time;
+  int result = ((job_t*)job2)->total_run_time - ((job_t*)job1)->total_run_time;
   if(result == 0)
     return ((job_t*)job2)->arrival_time - ((job_t*)job1)->arrival_time;
   return result;
@@ -73,7 +72,7 @@ int comparer_PPRI(const void* job1, const void* job2){
   return comparer_PRI(job1,job2);
 }
 int comparer_RR(const void* job1, const void* job2){
-  return ((job_t*)job2)->arrival_time - ((job_t*)job1)->arrival_time;
+  return ((job_t*)job2)->last_enqueued_time - ((job_t*)job1)->last_enqueued_time;
 }
 
 int (*comparers[6]) (const void*,const void*) = {comparer_FCFS,
@@ -88,7 +87,7 @@ int (*comparers[6]) (const void*,const void*) = {comparer_FCFS,
 void show_queue2(){
     /*
       for(node_t *node = priqueue.tail; node != NULL; node = node->prev){
-      printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time, ((job_t*)node->data)->priority);
+      printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->total_run_time, ((job_t*)node->data)->priority);
     }
     */
 }
@@ -113,7 +112,12 @@ void scheduler_start_up(int cores, scheme_t scheme)
   global_state.core_states = (int*)calloc(cores,sizeof(int));
   global_state.active_jobs = (job_t**)calloc(cores,sizeof(job_t*));
   global_state.scheme = scheme;
+  global_state.all_jobs_total_wait_time = 0;
+  global_state.all_jobs_total_response_time = 0;
+  global_state.all_jobs_completed = 0;
+  global_state.all_jobs_total_turnaround_time = 0;
   priqueue_init(&priqueue, comparers[scheme]);
+
 }
 
 //checks for and returns an idle core (starting from core 0) to schedule the new job on. If no cores are idle, it will return -1
@@ -130,9 +134,9 @@ int get_idle_core(){
 
 //called also when an active job is about to terminate
 void update_active_job_timings(job_t* active_job, int time){
-      active_job->active_time += time - active_job->last_active_time;
-      active_job->last_active_time = time;
-      active_job->remaining_time = active_job->running_time - active_job->active_time;
+      active_job->total_active_time += time - active_job->last_event_time;
+      active_job->last_event_time = time;
+      active_job->remaining_time = active_job->total_run_time - active_job->total_active_time;
 }
 
 void update_all_active_jobs_timings(int current_time){
@@ -165,14 +169,17 @@ void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //th
     }
     if(*target_core == -1){
       priqueue_offer(&priqueue, new_job); //simply enqueue this new job, since no cores had to be preempted
-      new_job->last_queue_time = current_time;
+      new_job->last_enqueued_time = current_time;
     }
     else{
       running_job = global_state.active_jobs[*target_core];
       update_active_job_timings(running_job, current_time);
+      running_job->last_enqueued_time = current_time;
       priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
-      running_job->last_active_time = running_job->last_queue_time = current_time;
+      
+      
       global_state.active_jobs[*target_core] = new_job;
+      new_job->last_scheduled_time = current_time;
       printf("\n\n******job %d preempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
 }
@@ -193,24 +200,24 @@ void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //th
 
   @param job_number a globally unique identification number of the job arriving.
   @param time the current time of the simulator.
-  @param running_time the total number of time units this job will run before it will be finished.
+  @param total_run_time the total number of time units this job will run before it will be finished.
   @param priority the priority of the job. (The lower the value, the higher the priority.)
   @return index of core job should be scheduled on
   @return -1 if no scheduling changes should be made.
 
  */
-int scheduler_new_job(int job_number, int time, int running_time, int priority)
+int scheduler_new_job(int job_number, int time, int total_run_time, int priority)
 {
   job_t *job = malloc(sizeof(job_t));
   job->job_number = job_number;
-  job->rr_arrival_time=time;
-  job->running_time = running_time;
-  job->remaining_time = running_time;
-  job->active_time = 0;
+  job->last_scheduled_time=-1; //not scheduled yet
+  job->total_run_time = total_run_time;
+  job->remaining_time = total_run_time;
+  job->total_active_time = 0;
   job->arrival_time = time;
   job->priority = priority; 
-  job->wait_time = 0;
-  job->last_active_time = time;
+  job->total_wait_time = 0;
+  job->last_event_time = time;
 
   int target_core = get_idle_core();
   int currently_schedulable = target_core != -1;
@@ -226,7 +233,7 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
       case SJF:
       case PRI:
       case RR:
-        job->last_queue_time = time;
+        job->last_enqueued_time = time;
         priqueue_offer(&priqueue, job); //push to the queue. the comparator function should take care of the location within the queue.
         break;
       case PSJF:
@@ -237,7 +244,7 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
     }
   }
   else{
-    job->last_active_time = time;
+    job->last_event_time = job->last_scheduled_time = time;
     global_state.active_jobs[target_core] = job;
   }
   //target_core will be -1 if this new job was pushed to the queue. otherwise it will be the core number on which this job will begin execution right away.
@@ -265,10 +272,10 @@ int scheduler_job_finished(int core_id, int job_number, int time)
   
   job_t* finished_job = global_state.active_jobs[core_id];
   
-  agg_job_completed++;
-  agg_job_response_time += (time - finished_job->arrival_time);
-  agg_turnaround_time += (time - finished_job->rr_arrival_time);
-  agg_job_wait_time += finished_job->wait_time;
+  global_state.all_jobs_completed++;
+  global_state.all_jobs_total_response_time += (time - finished_job->arrival_time);
+  global_state.all_jobs_total_turnaround_time += (time - finished_job->arrival_time);
+  global_state.all_jobs_total_wait_time += finished_job->total_wait_time;
   
   //printf("\nBefore Poll: "); show_queue2();
   job_t* next_job = priqueue_poll_head(&priqueue);
@@ -280,8 +287,8 @@ int scheduler_job_finished(int core_id, int job_number, int time)
   global_state.active_jobs[core_id] = NULL;
   
   if(next_job){
-    next_job->wait_time += time - next_job->last_queue_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
-    next_job->last_active_time = time; //this job is now active, so update its last active time
+    next_job->total_wait_time += time - next_job->last_enqueued_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
+    next_job->last_event_time = time; //this job is now active, so update its last active time
     
     global_state.active_jobs[core_id] = next_job;
     
@@ -311,16 +318,17 @@ int scheduler_quantum_expired(int core_id, int time)
   job_t *next_job, *expired_job = global_state.active_jobs[core_id];
   
   update_active_job_timings(expired_job, time);
-  expired_job->arrival_time = expired_job->last_active_time = expired_job->last_queue_time = time;
+  expired_job->last_enqueued_time = time;
+  
   priqueue_offer(&priqueue, expired_job); //send the expired job back in the queue
-  
-  
+    
   next_job = priqueue_poll_head(&priqueue); //get the next waiting job in the queue, and activate it
 
   if(!next_job)
       return -1;
   else{
       global_state.active_jobs[core_id] = next_job;
+      next_job->last_scheduled_time = time;
       return next_job->job_number;
   }
 }
@@ -335,7 +343,7 @@ int scheduler_quantum_expired(int core_id, int time)
  */
 float scheduler_average_waiting_time()
 {
-	return ((float)agg_job_wait_time/(float)agg_job_completed);
+	return ((float)global_state.all_jobs_total_wait_time/(float)global_state.all_jobs_completed);
 }
 
 
@@ -348,7 +356,7 @@ float scheduler_average_waiting_time()
  */
 float scheduler_average_turnaround_time()
 {
-	return ((float)agg_turnaround_time/(float)agg_job_completed);
+	return ((float)global_state.all_jobs_total_turnaround_time/(float)global_state.all_jobs_completed);
 }
 
 
@@ -361,7 +369,7 @@ float scheduler_average_turnaround_time()
  */
 float scheduler_average_response_time()
 {
-	return ((float)agg_job_response_time/(float)agg_job_completed);
+	return ((float)global_state.all_jobs_total_response_time/(float)global_state.all_jobs_completed);
 }
 
 
@@ -402,7 +410,7 @@ void scheduler_show_queue()
 {
     
     for(node_t *node = priqueue.tail; node != NULL; node = node->prev){
-      printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->running_time, ((job_t*)node->data)->priority);
+      printf("  %d[%d,%d;%d] ; ", ((job_t*)node->data)->job_number, ((job_t*)node->data)->remaining_time, ((job_t*)node->data)->total_run_time, ((job_t*)node->data)->priority);
     }
     printf("\n\n  ---------------\n  Core States\n");
     for(int core = 0; core < global_state.cores; ++core)
@@ -411,7 +419,7 @@ void scheduler_show_queue()
     job_t* j;
     for(int core = 0; core < global_state.cores; ++core){
       if((j = global_state.active_jobs[core]))
-        printf("  %d[%d,%d;%d] ;", j->job_number, j->remaining_time, j->running_time, j->priority);
+        printf("  %d[%d,%d;%d] ;", j->job_number, j->remaining_time, j->total_run_time, j->priority);
       else
         printf("  %d[%d,%d;%d] ;", -1,-1,-1,-1);
     }
