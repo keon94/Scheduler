@@ -28,6 +28,7 @@ typedef struct _job_t
   int last_scheduled_time; //the last time the job was scheduled
   int last_enqueued_time; //the last time when this job was enqueued 
   int total_wait_time;  //total time that the job has waited in the queue
+  int number_of_times_scheduled;
 } job_t;
 
 
@@ -132,26 +133,38 @@ int get_idle_core(){
   return -1;
 }
 
-//called also when an active job is about to terminate
+
 void update_active_job_timings(job_t* active_job, int time){
       active_job->total_active_time += time - active_job->last_event_time;
       active_job->last_event_time = time;
       active_job->remaining_time = active_job->total_run_time - active_job->total_active_time;
 }
 
-void update_all_active_jobs_timings(int current_time){
+void update_all_active_jobs_timings(int time){
   job_t* active_job;
   for(int core = 0; core < global_state.cores; ++core){
     if((active_job = global_state.active_jobs[core])){//update the job's rem time only if one exists on the core!
-      update_active_job_timings(active_job, current_time);
+      update_active_job_timings(active_job, time);
     }
   }
+}
+
+//called when a job is set to run on a core, at time time
+void activate_new_job(job_t *job, int core_id, int time){
+      job->total_wait_time += time - job->last_enqueued_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
+      job->last_event_time = time; 
+      job->last_scheduled_time = time;
+      job->number_of_times_scheduled++;
+      if(job->number_of_times_scheduled == 1)
+        global_state.all_jobs_total_response_time += (time - job->arrival_time);
+      global_state.active_jobs[core_id] = job;
+      global_state.core_states[core_id] = 1;
 }
 
 
 //called when the scheme is preemptive. called when a 'superior' job arrives and must preempt the currently running one (push it back in the queue)
 //target_core must have a value of -1
-void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //this function will be reached only when all cores are active, so the running job can never be null
+void preemptive_offer(job_t *new_job, int *target_core, int time){  //this function will be reached only when all cores are active, so the running job can never be null
     job_t* running_job = global_state.active_jobs[0];
     int comparison = 0;
     int maximum_comparison = priqueue.comparer(new_job , running_job); //maximum_comparsion used to find the maximum_comparsion rem time or priority value among the currently active jobs
@@ -169,17 +182,14 @@ void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //th
     }
     if(*target_core == -1){
       priqueue_offer(&priqueue, new_job); //simply enqueue this new job, since no cores had to be preempted
-      new_job->last_enqueued_time = current_time;
+      new_job->last_enqueued_time = time;
     }
     else{
       running_job = global_state.active_jobs[*target_core];
-      update_active_job_timings(running_job, current_time);
-      running_job->last_enqueued_time = current_time;
-      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job
-      
-      
-      global_state.active_jobs[*target_core] = new_job;
-      new_job->last_scheduled_time = current_time;
+      update_active_job_timings(running_job, time);
+      running_job->last_enqueued_time = time;
+      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job      
+      activate_new_job(new_job, *target_core, time);
       printf("\n\n******job %d preempted job %d*******\n\n", new_job->job_number, running_job->job_number);
     }
 }
@@ -208,16 +218,14 @@ void preemptive_offer(job_t *new_job, int *target_core, int current_time){  //th
  */
 int scheduler_new_job(int job_number, int time, int total_run_time, int priority)
 {
+  //initialise the job
   job_t *job = malloc(sizeof(job_t));
   job->job_number = job_number;
-  job->last_scheduled_time=-1; //not scheduled yet
-  job->total_run_time = total_run_time;
-  job->remaining_time = total_run_time;
-  job->total_active_time = 0;
-  job->arrival_time = time;
+  job->last_scheduled_time = -1; //not scheduled yet
+  job->remaining_time = job->total_run_time = total_run_time;
+  job->total_active_time = job->total_wait_time = job->number_of_times_scheduled = 0;
+  job->arrival_time = job->last_event_time = job->last_enqueued_tim = time;
   job->priority = priority; 
-  job->total_wait_time = 0;
-  job->last_event_time = time;
 
   int target_core = get_idle_core();
   int currently_schedulable = target_core != -1;
@@ -233,7 +241,6 @@ int scheduler_new_job(int job_number, int time, int total_run_time, int priority
       case SJF:
       case PRI:
       case RR:
-        job->last_enqueued_time = time;
         priqueue_offer(&priqueue, job); //push to the queue. the comparator function should take care of the location within the queue.
         break;
       case PSJF:
@@ -244,6 +251,7 @@ int scheduler_new_job(int job_number, int time, int total_run_time, int priority
     }
   }
   else{
+    job->number_of_times_scheduled++;
     job->last_event_time = job->last_scheduled_time = time;
     global_state.active_jobs[target_core] = job;
   }
@@ -273,7 +281,6 @@ int scheduler_job_finished(int core_id, int job_number, int time)
   job_t* finished_job = global_state.active_jobs[core_id];
   
   global_state.all_jobs_completed++;
-  global_state.all_jobs_total_response_time += (time - finished_job->arrival_time);
   global_state.all_jobs_total_turnaround_time += (time - finished_job->arrival_time);
   global_state.all_jobs_total_wait_time += finished_job->total_wait_time;
   
@@ -287,11 +294,7 @@ int scheduler_job_finished(int core_id, int job_number, int time)
   global_state.active_jobs[core_id] = NULL;
   
   if(next_job){
-    next_job->total_wait_time += time - next_job->last_enqueued_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
-    next_job->last_event_time = time; //this job is now active, so update its last active time
-    
-    global_state.active_jobs[core_id] = next_job;
-    
+    activate_new_job(next_job, core_id, time);   
     return next_job->job_number;
   }
   
@@ -327,11 +330,11 @@ int scheduler_quantum_expired(int core_id, int time)
   if(!next_job)
       return -1;
   else{
-      global_state.active_jobs[core_id] = next_job;
-      next_job->last_scheduled_time = time;
+      activate_new_job(next_job, core_id, time);
       return next_job->job_number;
   }
 }
+
 
 
 /**
