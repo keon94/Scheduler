@@ -149,7 +149,7 @@ void update_all_active_jobs_timings(int time){
   }
 }
 
-//called when a job is set to run on a core, at time time
+//called when a job is set to run on core_id, at time time
 void activate_job(job_t *job, int core_id, int time){
       job->total_wait_time += time - job->last_enqueued_time; //we will add the total time this job was in the queue (since its last activity) to its wait time
       job->last_event_time = time; 
@@ -191,7 +191,7 @@ void preemptive_offer(job_t *new_job, int *target_core, int time){  //this funct
     //preempt core 0 if necessary.
     if(maximum_comparison >= 0)
       *target_core = 0;
-    //in each core, starting from core 1, look for an "inferior" running job. if found, prempt it.
+    //in each core, starting from core 1, look for the most (hence maximum_comparison) "inferior" running job. if found, prempt it.
     for(int core = 1; core < global_state.cores; ++core){
       running_job = global_state.active_jobs[core];
       if((comparison = priqueue.comparer(new_job , running_job)) > 0 && comparison > maximum_comparison){ //we shall premept the running job in this case
