@@ -161,6 +161,25 @@ void activate_job(job_t *job, int core_id, int time){
       global_state.core_states[core_id] = 1;
 }
 
+//suspends a running job running on core_id at time time. This is called only by preemptive schemes.
+void suspend_job(job_t *job, int core_id, int time){
+      
+      update_active_job_timings(job, time);
+
+      //edge case: must check if job was already scheduled at this time. if so, we must undo some of the timing changes we made earlier
+      if(job->last_scheduled_time == time){
+        if(job->number_of_times_scheduled == 1)
+          global_state.all_jobs_total_response_time -= time - job->last_scheduled_time;
+        job->number_of_times_scheduled--;
+        //this job is being immediately unscheduled, yet last_scheduled_time will indicate this time. This is irreversible, since we overwrote that variable earlier. 
+        //however, it should have no effect on anything. 
+      }
+
+      job->last_enqueued_time = time;
+      priqueue_offer(&priqueue, job); //a core was preempted, thus swap its running job with the new one, and enqueue that job 
+      global_state.active_jobs[core_id] = NULL;
+}
+
 
 //called when the scheme is preemptive. called when a 'superior' job arrives and must preempt the currently running one (push it back in the queue)
 //target_core must have a value of -1
@@ -188,16 +207,7 @@ void preemptive_offer(job_t *new_job, int *target_core, int time){  //this funct
       //enqueue the running job
       running_job = global_state.active_jobs[*target_core]; 
       
-      update_active_job_timings(running_job, time);
-      
-      //edge case: must check if running_job was already scheduled at this time. if so, we must undo some of the timing changes we made earlier
-      if(running_job->last_scheduled_time == time){
-        global_state.all_jobs_total_response_time -= time - running_job->last_scheduled_time;
-        running_job->number_of_times_scheduled--;
-      }
-
-      running_job->last_enqueued_time = time;
-      priqueue_offer(&priqueue, running_job); //a core was preempted, thus swap its running job with the new one, and enqueue that job      
+      suspend_job(running_job, *target_core, time);
       
       //start the new job (on the same core)
       activate_job(new_job, *target_core, time);
