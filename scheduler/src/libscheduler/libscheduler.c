@@ -176,7 +176,7 @@ void suspend_job(job_t *job, int core_id, int time){
       }
 
       job->last_enqueued_time = time;
-      priqueue_offer(&priqueue, job); //a core was preempted, thus swap its running job with the new one, and enqueue that job 
+      priqueue_offer(&priqueue, job); 
       global_state.active_jobs[core_id] = NULL;
 }
 
